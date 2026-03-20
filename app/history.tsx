@@ -21,7 +21,7 @@ export default function HistoryScreen() {
 
   const fetchHistory = async () => {
     try {
-      const response = await axios.get('http://10.1.200.55:8000/transactions');
+      const response = await axios.get('https://expense-api-1-hw40.onrender.com');
       const data = response.data.data;
 
       // กรองข้อมูลตามเดือนที่เลือก (ปีปัจจุบัน)

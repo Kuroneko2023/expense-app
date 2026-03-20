@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { useRouter, useFocusEffect } from 'expo-router';
 
 // ดึง Base URL จาก .env (ตรวจสอบให้แน่ใจว่าใน .env ใช้ชื่อ EXPO_PUBLIC_API_URL)
-const API_URL = 'http://10.1.200.55:8000';
+const API_URL = 'https://expense-api-1-hw40.onrender.com';
 
 export default function HomeScreen() {
   const router = useRouter();
