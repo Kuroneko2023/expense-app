@@ -1,114 +1,139 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Dimensions, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { PieChart } from "react-native-chart-kit";
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 
 const screenWidth = Dimensions.get("window").width;
 
 export default function HistoryScreen() {
   const [chartData, setChartData] = useState([]);
+  const [groupedTransactions, setGroupedTransactions] = useState({});
   const [totalExpense, setTotalExpense] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+
+  const MONTHS = [
+    'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+  ];
 
   const fetchHistory = async () => {
     try {
-      // ดึงข้อมูลจาก API ตัวเดิม
       const response = await axios.get('http://10.1.200.55:8000/transactions');
       const data = response.data.data;
-      
-      // 1. กรองเฉพาะ "รายจ่าย" (expense)
-      const expenses = data.filter(item => item.type === 'expense');
+
+      // กรองข้อมูลตามเดือนที่เลือก (ปีปัจจุบัน)
+      const currentYear = new Date().getFullYear();
+      const filteredData = data.filter(item => {
+        const itemDate = new Date(item.transaction_date);
+        return itemDate.getMonth() === selectedMonth && itemDate.getFullYear() === currentYear;
+      });
+
+      // 1. ทำข้อมูลสำหรับ Pie Chart (เฉพาะรายจ่าย)
+      const expenses = filteredData.filter(item => item.type === 'expense');
       const sum = expenses.reduce((acc, curr) => acc + curr.amount, 0);
       setTotalExpense(sum);
 
-      // 2. จัดกลุ่มข้อมูลตามหมวดหมู่ (Grouping)
-      const grouped = expenses.reduce((acc, curr) => {
+      const categoryGroup = expenses.reduce((acc, curr) => {
         acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
         return acc;
       }, {});
 
-      // 3. กำหนดสีให้แต่ละหมวดหมู่ (ใช้โทนเดียวกับหน้า Home)
-      const colorPalette = ['#FF7675', '#74B9FF', '#55E6C1', '#FDCB6E', '#A29BFE', '#FAB1A0', '#636E72'];
-      
-      const formattedData = Object.keys(grouped).map((key, index) => ({
+      const colorPalette = ['#FF7675', '#74B9FF', '#55E6C1', '#FDCB6E', '#A29BFE', '#FAB1A0'];
+      const formattedChart = Object.keys(categoryGroup).map((key, index) => ({
         name: key,
-        population: grouped[key],
+        population: categoryGroup[key],
         color: colorPalette[index % colorPalette.length],
         legendFontColor: "#495057",
-        legendFontSize: 13
+        legendFontSize: 12
       }));
+      setChartData(formattedChart);
 
-      setChartData(formattedData);
+      // 2. จัดกลุ่มรายการแยกตามวันที่ (Daily Grouping)
+      const dailyGroup = filteredData.sort((a, b) => 
+        new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime()
+      ).reduce((acc, curr) => {
+        const dateStr = new Date(curr.transaction_date).toLocaleDateString('th-TH', {
+          day: 'numeric', month: 'long', year: 'numeric'
+        });
+        if (!acc[dateStr]) acc[dateStr] = [];
+        acc[dateStr].push(curr);
+        return acc;
+      }, {});
+      
+      setGroupedTransactions(dailyGroup);
     } catch (error) {
-      console.error("ดึงข้อมูลประวัติไม่สำเร็จ:", error);
+      console.error("Fetch Error:", error);
     } finally {
       setRefreshing(false);
     }
   };
 
-  useEffect(() => {
-    fetchHistory();
-  }, []);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchHistory();
-  };
+  useFocusEffect(useCallback(() => { fetchHistory(); }, [selectedMonth]));
 
   return (
     <View style={styles.container}>
+      {/* ส่วนเลือกเดือน */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>วิเคราะห์รายจ่าย 📊</Text>
+        <Text style={styles.headerTitle}>ประวัติการเงิน 📑</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.monthSelector}>
+          {MONTHS.map((m, index) => (
+            <TouchableOpacity 
+              key={m} 
+              onPress={() => setSelectedMonth(index)}
+              style={[styles.monthBtn, selectedMonth === index && styles.monthBtnActive]}
+            >
+              <Text style={[styles.monthText, selectedMonth === index && styles.monthTextActive]}>{m}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       <ScrollView 
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => {setRefreshing(true); fetchHistory();}} />}
       >
-        {/* Card แสดงยอดรวม */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>รายจ่ายรวมทั้งหมด</Text>
-          <Text style={styles.summaryValue}>฿ {totalExpense.toLocaleString()}</Text>
-        </View>
-
-        {/* ส่วนของกราฟ Pie Chart */}
-        <View style={styles.chartSection}>
-          <Text style={styles.sectionTitle}>สัดส่วนตามหมวดหมู่</Text>
-          
+        {/* Pie Chart Card */}
+        <View style={styles.chartCard}>
+          <Text style={styles.sectionTitle}>สรุปรายจ่ายเดือนนี้: ฿{totalExpense.toLocaleString()}</Text>
           {chartData.length > 0 ? (
-            <View style={styles.chartWrapper}>
-              <PieChart
-                data={chartData}
-                width={screenWidth - 40}
-                height={220}
-                chartConfig={{
-                  color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                }}
-                accessor={"population"}
-                backgroundColor={"transparent"}
-                paddingLeft={"15"}
-                center={[10, 0]}
-                absolute // แสดงเป็นตัวเลขเงินจริงในกราฟ
-              />
-            </View>
-          ) : (
-            <View style={styles.emptyBox}>
-              <Ionicons name="bar-chart-outline" size={50} color="#DEE2E6" />
-              <Text style={styles.emptyText}>ยังไม่มีข้อมูลรายจ่ายให้วิเคราะห์</Text>
-            </View>
-          )}
+            <PieChart
+              data={chartData}
+              width={screenWidth - 60}
+              height={200}
+              chartConfig={{ color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})` }}
+              accessor={"population"}
+              backgroundColor={"transparent"}
+              paddingLeft={"15"}
+              absolute
+            />
+          ) : <Text style={styles.emptyText}>ไม่มีข้อมูลการใช้จ่ายในเดือนนี้</Text>}
         </View>
 
-        {/* คำแนะนำสั้นๆ */}
-        <View style={styles.tipCard}>
-          <Ionicons name="bulb-outline" size={20} color="#FBC02D" />
-          <Text style={styles.tipText}>
-            ลองตรวจสอบหมวดหมู่ที่ใช้เงินเยอะที่สุด เพื่อวางแผนประหยัดในเดือนถัดไปนะครับ
-          </Text>
+        {/* รายการแยกตามวัน */}
+        <View style={{ paddingHorizontal: 20, marginTop: 10 }}>
+          {Object.keys(groupedTransactions).map((date) => (
+            <View key={date} style={styles.dayGroup}>
+              <Text style={styles.dateHeader}>{date}</Text>
+              {groupedTransactions[date].map((item, idx) => (
+                <View key={idx} style={styles.itemCard}>
+                  <View style={[styles.iconBox, { backgroundColor: item.type === 'income' ? '#E8F5E9' : '#FFEBEE' }]}>
+                    <Ionicons name={item.type === 'income' ? 'add' : 'remove'} size={20} color={item.type === 'income' ? '#2E7D32' : '#C62828'} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemNote}>{item.note || item.category}</Text>
+                    <Text style={styles.itemCat}>{item.category}</Text>
+                  </View>
+                  <Text style={[styles.itemAmount, { color: item.type === 'income' ? '#2E7D32' : '#C62828' }]}>
+                    {item.type === 'income' ? '+' : '-'} ฿{item.amount.toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))}
         </View>
-
-        <View style={{ height: 50 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
     </View>
   );
@@ -116,47 +141,21 @@ export default function HistoryScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { marginTop: 60, paddingHorizontal: 20, marginBottom: 20 },
-  headerTitle: { fontSize: 26, fontWeight: '800', color: '#1A1A1A' },
-  
-  summaryCard: { 
-    marginHorizontal: 20, 
-    backgroundColor: '#FF7675', 
-    borderRadius: 25, 
-    padding: 25, 
-    elevation: 5,
-    shadowColor: '#FF7675',
-    shadowOpacity: 0.3,
-    shadowRadius: 10
-  },
-  summaryLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
-  summaryValue: { color: '#FFF', fontSize: 32, fontWeight: '800', marginTop: 5 },
-
-  chartSection: { 
-    marginTop: 25, 
-    marginHorizontal: 20, 
-    backgroundColor: '#FFF', 
-    borderRadius: 25, 
-    padding: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3
-  },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#2D3436', marginBottom: 15 },
-  chartWrapper: { alignItems: 'center' },
-  
-  tipCard: { 
-    flexDirection: 'row', 
-    marginHorizontal: 20, 
-    marginTop: 20, 
-    backgroundColor: '#FFF9C4', 
-    padding: 15, 
-    borderRadius: 15, 
-    alignItems: 'center' 
-  },
-  tipText: { flex: 1, marginLeft: 10, fontSize: 13, color: '#856404', fontWeight: '500' },
-  
-  emptyBox: { alignItems: 'center', padding: 40 },
-  emptyText: { marginTop: 10, color: '#ADB5BD', fontSize: 14 }
+  header: { marginTop: 60, paddingHorizontal: 20 },
+  headerTitle: { fontSize: 24, fontWeight: '800', marginBottom: 15 },
+  monthSelector: { flexDirection: 'row', marginBottom: 10 },
+  monthBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 10, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E9ECEF' },
+  monthBtnActive: { backgroundColor: '#0984E3', borderColor: '#0984E3' },
+  monthText: { color: '#636E72', fontWeight: '600' },
+  monthTextActive: { color: '#FFF' },
+  chartCard: { margin: 20, backgroundColor: '#FFF', borderRadius: 25, padding: 20, elevation: 3 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#2D3436', marginBottom: 10 },
+  dayGroup: { marginBottom: 20 },
+  dateHeader: { fontSize: 14, fontWeight: '700', color: '#ADB5BD', marginBottom: 10, marginLeft: 5 },
+  itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 15, borderRadius: 15, marginBottom: 8 },
+  iconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  itemNote: { fontSize: 15, fontWeight: '600', color: '#2D3436' },
+  itemCat: { fontSize: 12, color: '#ADB5BD' },
+  itemAmount: { fontSize: 15, fontWeight: '700' },
+  emptyText: { textAlign: 'center', color: '#ADB5BD', marginVertical: 20 }
 });
